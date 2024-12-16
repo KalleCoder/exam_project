@@ -13,15 +13,17 @@ class MainWindow(QMainWindow):
         # Set the background color of the window to white
         self.setStyleSheet("background-color: white; color: black;")
 
-        # Create a CLOSE BUTTON
-        close_button = QPushButton("Close Session", self)
-        close_button.clicked.connect(self.close)  # Connect button to close event
-        # Place the button in the top left corner
-        close_button.setGeometry(10, 10, 110, 30)
+        # Session flag to track if the session is established or not
+        self.session_active = False
+
+        # Create a button for establishing/closing session
+        self.session_button = QPushButton("Establish Session", self)
+        self.session_button.clicked.connect(self.toggle_session)  # Connect button to toggle session event
+        self.session_button.setGeometry(10, 10, 130, 30)
 
         # Create a GET TEMPERATURE BUTTON
         temperature_button = QPushButton("Get Temperature", self)
-        temperature_button.setGeometry(140, 10, 130, 30)
+        temperature_button.setGeometry(150, 10, 130, 30)
         temperature_button.clicked.connect(self.get_temperature)
 
         # Create a TOGGLE RELAY BUTTON
@@ -52,6 +54,17 @@ class MainWindow(QMainWindow):
                 color: #FFD700;
             }
         """)
+
+    def toggle_session(self):
+        """Toggle between establishing and closing the session."""
+        if self.session_active:
+            self.session_active = False
+            self.session_button.setText("Establish Session")  # Change button text to "Establish Session"
+            self.terminal.append("Session Closed")  # Print to terminal
+        else:
+            self.session_active = True
+            self.session_button.setText("Close Session")  # Change button text to "Close Session"
+            self.terminal.append("Session Established")  # Print to terminal
 
 
     def get_temperature(self):

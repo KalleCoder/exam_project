@@ -97,15 +97,47 @@ class MainWindow(QMainWindow):
 
     def get_temperature(self):
         try:
-            temperature = self.communication.request_temperature()
-            self.terminal.append(f"Temperature: {temperature}°C")
+            # Send message to request temperature
+            self.communication.send_message("temp")
+            
+            # Wait for and receive the temperature response (buffer with 2 bytes)
+            temperature_buffer = self.communication.receive_message()
+
+            # Ensure the received message has exactly 2 bytes
+            if len(temperature_buffer) != 2:
+                self.terminal.append("Error: Invalid temperature data received.")
+                return
+
+            # Unpack the two bytes into a single uint16_t value
+            high_byte = temperature_buffer[0]
+            low_byte = temperature_buffer[1]
+            
+            # Combine the two bytes into a single uint16_t value
+            temp_value_uint16 = (high_byte << 8) | low_byte
+
+            # Convert the value back to the float temperature by dividing by 10
+            temp_value = temp_value_uint16 / 100.0
+            
+            # Append the temperature to the terminal
+            self.terminal.append(f"Temperature: {temp_value}°C")
+        
         except Exception as e:
+            # If any error occurs during communication, show an error message
             self.terminal.append(f"Error retrieving temperature: {e}")
+
+
+
 
     def toggle_relay(self):
         try:
-            self.communication.send_message("TOGGLE_RELAY")
-            self.terminal.append("Relay toggled")
+            self.communication.send_message("relay")
+            relay_status = self.communication.receive_message()
+
+            if relay_status:
+                self.terminal.append("Relay toggled")
+            else: 
+                self.terminal.append("Failed to toggle Relay")
+                
         except Exception as e:
             self.terminal.append(f"Error toggling relay: {e}")
 

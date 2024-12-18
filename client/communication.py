@@ -102,13 +102,20 @@ class Communication:
         encrypted_iv = self.rsa_encrypt(self.iv)
 
         # Step 3: Send public RSA key to the server
-        public_key = self.rsa_keys.export_public_key()
+        public_key = self.rsa_keys.export_public_key(format='DER')
+        print(f"Public key size: {len(public_key)}")  # Check the length
         self.serial_connection.write(public_key)
         print("Public key sent to server.")
 
+        time.sleep(1)  # Add a 1-second delay to give the server time to process
+
         # Step 4: Send encrypted AES key and IV
         self.serial_connection.write(encrypted_aes_key)
+        time.sleep(1)
         self.serial_connection.write(encrypted_iv)
+        print(f"Encrypted AES key size: {len(encrypted_aes_key)}")
+        print(f"Encrypted IV size: {len(encrypted_iv)}")
+
 
         # Step 5: Wait for server acknowledgment
         response = self.serial_connection.readline().strip()

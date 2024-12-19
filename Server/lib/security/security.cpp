@@ -227,7 +227,7 @@ void wait_for_session_request()
     while (!Serial.available())
     {
         // Serial.println("Waiting for client to initiate session...");
-        delay(1000); // Polling for incoming data
+        delay(100); // Polling for incoming data
     }
 
     bytesRead = Serial.readBytes(buffer, DER_SIZE);
@@ -239,12 +239,12 @@ void wait_for_session_request()
         int return_thing = mbedtls_pk_parse_public_key(&rsa_pub_ctx, buffer, DER_SIZE);
         if (return_thing != 0)
         {
-            // Serial.print("Error importing public key: ");
+            Serial.print("Error importing public key: ");
             Serial.println(return_thing);
         }
         else
         {
-            // Serial.println("Client public key imported successfully.");
+            Serial.println("Client public key imported successfully.");
         }
 
         // Wait until there are enough bytes available
@@ -252,41 +252,77 @@ void wait_for_session_request()
         {
             delay(100);
         }
+
         // Step 2: Wait for the encrypted AES key
         bytesRead = Serial.readBytes(encrypted_aes_key, RSA_SIZE);
         if (bytesRead == RSA_SIZE)
         {
+            // Wait until there are enough bytes available
             while (Serial.available() < 256)
             {
                 delay(100);
             }
+
             // Step 3: Wait for the encrypted IV
             bytesRead = Serial.readBytes(encrypted_iv, RSA_SIZE);
-            if (bytesRead != RSA_SIZE)
+            if (bytesRead == RSA_SIZE)
+            {
+
+                // Ensure the key context is initialized and contains a private key
+                if (!mbedtls_pk_can_do(&rsa_keys_ctx, MBEDTLS_PK_RSA))
+                {
+                    Serial.println("Key context is not of RSA type.");
+                    return;
+                }
+
+                // Step 4: Decrypt the AES key
+                size_t decrypted_length = 0;
+                int ret = -1;
+
+                // Attempt to decrypt the AES key
+                ret = mbedtls_pk_decrypt(
+                    &rsa_keys_ctx,           // Private key context
+                    encrypted_aes_key,       // Input: Encrypted data
+                    RSA_SIZE,                // Input length
+                    aes_key,                 // Output: Decrypted data
+                    &decrypted_length,       // Output length
+                    AES_SIZE,                // Max output buffer size
+                    mbedtls_ctr_drbg_random, // RNG function
+                    &ctr_drbg                // RNG context
+                );
+
+                if (ret == 0)
+                {
+                    // Step 5: Decrypt the IV
+                    ret = mbedtls_pk_decrypt(&rsa_keys_ctx, encrypted_iv, RSA_SIZE, iv,
+                                             &decrypted_length, sizeof(iv), mbedtls_ctr_drbg_random, &ctr_drbg);
+                    if (ret == 0)
+                    {
+                        // Step 6: Send acknowledgment
+                        Serial.println("ACK");
+                        Serial.println("Session established successfully. Ready for communication.");
+                    }
+                    else
+                    {
+                        Serial.print("Error during IV decryption: ");
+                        Serial.println(ret);
+                    }
+                }
+                else
+                {
+                    delay(500);
+                    char error_buf[100];
+                    mbedtls_strerror(ret, error_buf, sizeof(error_buf));
+                    Serial.print("Decryption error: ");
+                    Serial.println(error_buf);
+
+                    /* Serial.print("Decrypted AES key: ");
+                    print(aes_key, AES_SIZE); */
+                }
+            }
+            else
             {
                 Serial.println("Error: Encrypted IV not fully received.");
-            }
-
-            // Step 4: Decrypt the AES key
-            size_t decrypted_length;
-            int ret = mbedtls_pk_decrypt(&rsa_keys_ctx, encrypted_aes_key, RSA_SIZE, aes_key,
-                                         &decrypted_length, AES_SIZE, mbedtls_ctr_drbg_random, &ctr_drbg);
-            if (ret != 0)
-            {
-                Serial.print("Error during AES key decryption: ");
-                Serial.println(ret);
-            }
-
-            /* Serial.print("Decrypted AES key: ");
-            print(aes_key, AES_SIZE); */
-
-            // Step 5: Decrypt the IV
-            ret == mbedtls_pk_decrypt(&rsa_keys_ctx, encrypted_iv, RSA_SIZE, iv,
-                                      &decrypted_length, sizeof(iv), mbedtls_ctr_drbg_random, &ctr_drbg);
-            if (ret != 0)
-            {
-                Serial.print("Error during IV decryption: ");
-                Serial.println(ret);
             }
 
             /* Serial.print("Decrypted AES key: ");
@@ -305,10 +341,6 @@ void wait_for_session_request()
 
             Serial.print("Decrypted IV: ");
             print(iv, sizeof(iv)); */
-
-            // Step 6: Send acknowledgment
-            Serial.println("ACK");
-            Serial.println("Session established successfully. Ready for communication.");
         }
         else
         {
@@ -320,7 +352,6 @@ void wait_for_session_request()
     }
     else
     {
-
         Serial.println("Error: Invalid public key received.");
     }
 }

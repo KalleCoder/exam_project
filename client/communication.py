@@ -101,8 +101,13 @@ class Communication:
         encrypted_aes_key = self.rsa_encrypt(self.aes_key)
         encrypted_iv = self.rsa_encrypt(self.iv)
 
+        # Print the encrypted AES key in a readable format
+        print(f"Encrypted AES key: {encrypted_aes_key.hex()}")
+        #print(f"Encrypted IV: {encrypted_iv.hex()}")
+
         # Step 3: Send public RSA key to the server
-        public_key = self.rsa_keys.export_public_key(format='DER')
+        #public_key = self.rsa_keys.export_public_key(format='DER')
+        public_key = self.rsa_keys.export_public_key()
         print(f"Public key size: {len(public_key)}")  # Check the length
         self.serial_connection.write(public_key)
         print("Public key sent to server.")

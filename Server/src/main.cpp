@@ -31,10 +31,12 @@ static uint8_t dec_iv[AES_BLOCK_SIZE]{0};
 // static const char *SECRET = "Fj2-;wu3Ur=ARl2!Tqi6IuKM3nG]8z1+";
 
 static uint8_t SEC_KEY[32] = {
-    0x29, 0x49, 0xDE, 0xC2, 0x3E, 0x1E, 0x34, 0xB5, 0x2D, 0x22,
-    0xB5, 0xBA, 0x4C, 0x34, 0x23, 0x3A, 0x9D, 0x3F, 0xE2, 0x97,
-    0x14, 0xBE, 0x24, 0x62, 0x81, 0x0C, 0x86, 0xB1, 0xF6, 0x92,
-    0x54, 0xD6};
+    0x46, 0x6A, 0x32, 0x2D, 0x3B, 0x77, 0x75, 0x33,
+    0x55, 0x72, 0x3D, 0x41, 0x52, 0x6C, 0x32, 0x21,
+    0x54, 0x71, 0x69, 0x36, 0x49, 0x75, 0x4B, 0x4D,
+    0x33, 0x6E, 0x47, 0x5D, 0x38, 0x7A, 0x31, 0x2B};
+
+static uint8_t client_public_key[DER_SIZE]; // Global variable to store the client’s public key
 
 #define RED_LED 26
 #define GREEN_LED 23
@@ -84,13 +86,21 @@ bool verify_hash(const uint8_t *public_key, size_t public_key_size, const uint8_
     mbedtls_sha256_update(&sha256_ctx, public_key, public_key_size);
     mbedtls_sha256_finish(&sha256_ctx, computed_hash);
 
-    // Compare the computed hash with the expected hash
+    // Debugging: Print computed hash
+    // Serial.print("Computed Hash: ");
     for (size_t i = 0; i < HASH_SIZE; i++)
     {
-        if (computed_hash[i] != expected_hash[i])
-        {
-            return false; // Hashes don't match
-        }
+        uint8_t byte = computed_hash[i];
+        /* Serial.print((byte >> 4) & 0x0F, HEX); // Upper nibble
+        Serial.print(byte & 0x0F, HEX);        // Lower nibble */
+    }
+    // Serial.println();
+
+    // Compare the computed hash with the expected hash using memcmp
+    if (memcmp(computed_hash, expected_hash, HASH_SIZE) != 0)
+    {
+        Serial.println("Hashes don't match!");
+        return false; // Hashes don't match
     }
 
     return true; // Hashes match
@@ -100,7 +110,7 @@ bool verify_hmac_signature(const uint8_t *public_key, size_t public_key_size, co
 {
     uint8_t computed_hmac[HASH_SIZE];
 
-    // Compute HMAC-SHA256 of the public key
+    // compute HMAC-SHA256 of the public key
     mbedtls_md_hmac_starts(&hmac_ctx, SEC_KEY, sizeof(SEC_KEY));
     mbedtls_md_hmac_update(&hmac_ctx, public_key, public_key_size);
     mbedtls_md_hmac_finish(&hmac_ctx, computed_hmac);
@@ -109,9 +119,88 @@ bool verify_hmac_signature(const uint8_t *public_key, size_t public_key_size, co
     if (memcmp(computed_hmac, received_hmac, hmac_size) != 0)
     {
         Serial.println("HMAC signature verification failed.");
+        Serial.print("Computed HMAC: ");
+        for (size_t i = 0; i < HASH_SIZE; i++)
+        {
+            uint8_t byte = computed_hmac[i];
+            Serial.print((byte >> 4) & 0x0F, HEX); // Print the upper nibble (first half)
+            Serial.print(byte & 0x0F, HEX);        // Print the lower nibble (second half)
+        }
+        Serial.println();
         return false; // HMAC doesn't match
     }
+    // Serial.println("HMAC signature verification Succeded!.");
     return true; // HMAC matches
+}
+
+// void send_encrypted_server_key(uint8_t *server_public_key)
+void send_encrypted_server_key(void)
+{
+    uint8_t public_key[DER_SIZE];
+
+    int ret = mbedtls_pk_write_pubkey_der(&rsa_keys_ctx, public_key, sizeof(public_key));
+    if (ret < 0)
+    {
+        delay(500);
+        char error_buf[100];
+        mbedtls_strerror(ret, error_buf, sizeof(error_buf));
+        Serial.print("Failed to write public key in DER format, error code: ");
+        Serial.println(error_buf);
+        return;
+    }
+
+    ret = mbedtls_pk_parse_public_key(&rsa_pub_ctx, public_key, DER_SIZE);
+    if (ret != 0)
+    {
+        // Handle error
+        delay(500);
+        char error_buf[100];
+        mbedtls_strerror(ret, error_buf, sizeof(error_buf));
+        Serial.print("Failed to parse public key, error code: ");
+        Serial.println(error_buf);
+        return;
+    }
+
+    // Initialize the client public key context
+    mbedtls_pk_context client_pub_key_ctx;
+    mbedtls_pk_init(&client_pub_key_ctx);
+
+    // Parse the client public key into the context
+    ret = mbedtls_pk_parse_public_key(&client_pub_key_ctx, client_public_key, DER_SIZE);
+    if (ret != 0)
+    {
+        Serial.print("Failed to parse client public key, error: ");
+        Serial.println(ret);
+        return;
+    }
+
+    // Now, we will encrypt the server's public key using the client's public key
+    uint8_t encrypted_server_key[RSA_SIZE]; // Buffer to hold the encrypted server public key
+    size_t encrypted_len = 0;
+
+    // Encrypt the server's public key using the client’s public key
+    ret = mbedtls_pk_encrypt(&client_pub_key_ctx, public_key, DER_SIZE, encrypted_server_key, &encrypted_len, sizeof(encrypted_server_key), mbedtls_ctr_drbg_random, &ctr_drbg);
+    if (ret != 0)
+    {
+        delay(500);
+        char error_buf[100];
+        mbedtls_strerror(ret, error_buf, sizeof(error_buf));
+        Serial.print("Encryption failed, error: ");
+        Serial.println(error_buf);
+        return;
+    }
+
+    // Send the encrypted server public key (For example, send it via Serial)
+    Serial.print("Encrypted server public key: ");
+    for (size_t i = 0; i < encrypted_len; i++)
+    {
+        Serial.print(encrypted_server_key[i], HEX);
+        Serial.print(" ");
+    }
+    Serial.println();
+
+    // Clean up the client public key context
+    mbedtls_pk_free(&client_pub_key_ctx);
 }
 
 void setup()
@@ -160,28 +249,46 @@ void setup()
 void exchange_keys()
 {
     // Initialize RSA contexts for server keys
-    // mbedtls_pk_init(&rsa_pub_ctx);
     mbedtls_pk_init(&rsa_keys_ctx);
-    // mbedtls_pk_init(&rsa_client_public_key_ctx);
+    mbedtls_pk_init(&rsa_pub_ctx);
+
+    // signing that it can start echanging keys
+    blink_green(2, 500);
 
     // FIRST WE GET RSA KEY
-    while (Serial.available() != 240)
-    {
-        blink_blue(1, 100); // Optional: blink to indicate waiting
-        Serial.print("Waiting... Available bytes: ");
-        Serial.println(Serial.available());
-    }
 
     // Read the  public key (first part)
-    uint8_t client_pub_key[RSA_SIZE];
-    Serial.print("Received RSA: ");
-    for (size_t i = 0; i < 32; i++)
+    uint8_t client_pub_key[DER_SIZE];
+    size_t received_bytes = 0;
+
+    while (received_bytes < DER_SIZE)
     {
-        client_pub_key[i] = Serial.read();
-        uint8_t byte = client_pub_key[i];
-        Serial.print((byte >> 4) & 0x0F, HEX); // Print the upper nibble (first half)
-        Serial.print(byte & 0x0F, HEX);        // Print the lower nibble (second half)
+        if (Serial.available() > 0)
+        {
+            client_pub_key[received_bytes] = Serial.read();
+            received_bytes++;
+        }
+        else
+        {
+            // blink_blue(1, 1)
+            delay(1); // Allow time for data to arrive
+        }
     }
+
+    // Empty the serial buffer by reading and discarding any remaining data
+    while (Serial.available() > 0)
+    {
+        Serial.read(); // Read and discard remaining bytes
+    }
+
+    /* // Print the entire key
+    Serial.print("Received public key: ");
+    for (size_t i = 0; i < DER_SIZE; i++)
+    {
+        Serial.print(client_pub_key[i], HEX);
+        Serial.print(" ");
+    }
+    Serial.println(); */
 
     // =============== THE WE GET HMAC
     while (Serial.available() != 32)
@@ -208,16 +315,16 @@ void exchange_keys()
     Serial.println();
 
     // Verify HMAC signature of the public key
-    bool is_hmac_valid = verify_hmac_signature(client_pub_key, RSA_SIZE, client_HMAC, HASH_SIZE);
+    bool is_hmac_valid = verify_hmac_signature(client_pub_key, DER_SIZE, client_HMAC, HASH_SIZE);
 
-    if (is_hmac_valid)
+    /* if (is_hmac_valid)
     {
         blink_green(5, 500); // Indicate success if both hash and HMAC are valid
     }
     else
     {
         blink_red(5, 500); // Indicate failure if hash or HMAC is invalid
-    }
+    } */
 
     // ===================== THE WE GET HASH
     while (Serial.available() != HASH_SIZE)
@@ -245,17 +352,26 @@ void exchange_keys()
     Serial.println();
 
     // Verify the hash
-    bool is_hash_valid = verify_hash(client_pub_key, RSA_SIZE, signed_pub_key_hash);
-    if (is_hash_valid)
+    bool is_hash_valid = verify_hash(client_pub_key, DER_SIZE, signed_pub_key_hash);
+    /* if (is_hash_valid)
     {
+        Serial.println("Hash is valid");
         blink_green(5, 500);
     }
     else
     {
+        Serial.println("Hash not valid");
         blink_red(5, 500);
-    }
+    } */
 
     // Save the first public key
+    if (is_hash_valid && is_hmac_valid)
+    {
+        // Save the received public key to the global static variable
+        memcpy(client_public_key, client_pub_key, DER_SIZE);
+
+        send_encrypted_server_key();
+    }
 
     // ======================  THE FIRST KEY RECIVED ========================0
 

@@ -28,6 +28,10 @@ class Communication:
         self.server_pub_key = None  # Placeholder for the server's public key
         print(f"Public key size: {len(self.client_keys)} bytes")
 
+        # Iterate over each byte in the byte string and print it as a hexadecimal string
+        for byte in _SECRET_KEY:
+            print(f'{byte:02X}', end=' ') 
+
 
     def encrypt_with_private_key(self, data):
         """ Encrypt data with the client's private key (signing) """
@@ -57,13 +61,10 @@ class Communication:
         signed_pub_key = hmac_object.digest()  # Get the digest (signed result)
         
         # Hash the signed public key to send its hash
-        signed_pub_key_hash = self.hash_data(signed_pub_key)
-
-        public_key_der = self.rsa_keys.export_public_key(format="DER")
-
+        signed_pub_key_hash = self.hash_data(self.client_keys)
 
         # Print the size (in bytes) of the data being written
-        print(f"Size of public_key_der (public key): {len(public_key_der)} bytes")
+        print(f"Size of public_key_der (public key): {len(self.client_keys)} bytes")
         print(f"Size of signed_pub_key: {len(signed_pub_key)} bytes")
         print(f"Size of signed_pub_key_hash: {len(signed_pub_key_hash)} bytes")
 
@@ -73,14 +74,23 @@ class Communication:
         print(f"Sending signed_pub_key_hash (hex): {signed_pub_key_hash.hex()}")
 
         # Send the public key, signed public key, and its hash
-        self.serial_connection.write(public_key_der)  # Send the actual public key
-        self.serial_connection.flush()  # Ensure data is written out of the buffer
-        time.sleep(2)
+        """ time.sleep(2)
+        self.serial_connection.write(self.client_keys)  # Send the actual public key
+        self.serial_connection.flush()  # Ensure data is written out of the buffer """
+
+        chunk_size = 64
+        for i in range(0, len(self.client_keys), chunk_size):
+            self.serial_connection.write(self.client_keys[i:i + chunk_size])
+            self.serial_connection.flush()
+            time.sleep(0.5)  # Allow the server to process each chunk
+
+        self.serial_connection.flush()
+        time.sleep(1)
         self.serial_connection.write(signed_pub_key)  # Send the signed public key
         self.serial_connection.flush()  # Ensure signature is written out
         time.sleep(2)
         self.serial_connection.write(signed_pub_key_hash)  # Send the hash
-        self.serial_connection.flush()  # Ensure hash is written out
+        self.serial_connection.flush()  # Ensure hash is written out """
 
         return True
 
@@ -136,35 +146,40 @@ def startup():
     
     comm = Communication(port=args.port, baudrate=args.baudrate)
 
-    while True:
+    if not comm.send_public_key():
+            print("Error in sending encrypted public key.")
+            time.sleep(1)
+
+
+    """ while True:
         if not comm.send_public_key():
             print("Error in sending encrypted public key.")
             time.sleep(1)
 
-            """ if comm.serial_connection.in_waiting > 0:
-                encrypted_server_pub_key, server_pub_key_hash = comm.receive_server_public_key()
+           if comm.serial_connection.in_waiting > 0:
+            encrypted_server_pub_key, server_pub_key_hash = comm.receive_server_public_key()
 
-                decrypted_server_pub_key = comm.decrypt_server_public_key(encrypted_server_pub_key)
-                if decrypted_server_pub_key is None:
-                    print("Error decrypting server public key.")
-                    continue
+            decrypted_server_pub_key = comm.decrypt_server_public_key(encrypted_server_pub_key)
+            if decrypted_server_pub_key is None:
+                print("Error decrypting server public key.")
+                continue
 
-                print(f"Decrypted server public key: {decrypted_server_pub_key}")
+            print(f"Decrypted server public key: {decrypted_server_pub_key}")
 
-                if not comm.verify_received_hash(encrypted_server_pub_key, server_pub_key_hash):
-                    print("Hash verification failed!")
-                    continue
+            if not comm.verify_received_hash(encrypted_server_pub_key, server_pub_key_hash):
+                print("Hash verification failed!")
+                continue
 
-                print("Hash verification passed!")
+            print("Hash verification passed!")
 
-                if not comm.send_new_public_key():
-                    print("Error in sending new public key.")
-                else:
-                    print("Key exchange process completed.")
-                    break """
+            if not comm.send_new_public_key():
+                print("Error in sending new public key.")
+            else:
+                print("Key exchange process completed.")
+                break  
         else:
             print("Sent public key.")
-            time.sleep(1)
+            time.sleep(1)  """
 
 if __name__ == "__main__":
     startup()

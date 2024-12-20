@@ -174,10 +174,54 @@ void send_encrypted_server_key(void)
 
     // Now, we will encrypt the server's public key using the client's public key
     uint8_t encrypted_server_key[RSA_SIZE]{0}; // Buffer to hold the encrypted server public key
-    size_t encrypted_len{0};
+    size_t encrypted_len;
 
+    // Public key is bigger than RSA_SIZE at 294 bytes
+    // so we first split it into two parts
+    uint8_t part1[DER_SIZE / 2]{0}; // Buffer for first half
+    uint8_t part2[DER_SIZE / 2]{0}; // Buffer for second half
+
+    // Send the encrypted server public key (For example, send it via Serial)
+    Serial.print("Server public key: ");
+    for (size_t i = 0; i < DER_SIZE; i++)
+    {
+        // Serial.print(server_public_key[i], HEX);
+        uint8_t byte = server_public_key[i];
+        Serial.print((byte >> 4) & 0x0F, HEX); // Print the upper nibble (first half)
+        Serial.print(byte & 0x0F, HEX);        // Print the lower nibble (second half)
+        Serial.print(" ");
+    }
+    Serial.println();
+
+    // Populate the buffers with the respective halves of the key
+    memcpy(part1, server_public_key, (DER_SIZE / 2));
+    memcpy(part2, server_public_key + (DER_SIZE / 2), (DER_SIZE / 2));
+
+    /* // Send the encrypted server public key (For example, send it via Serial)
+    Serial.print("Part 1 public key: ");
+    for (size_t i = 0; i < (DER_SIZE / 2); i++)
+    {
+        uint8_t byte = part1[i];
+        Serial.print((byte >> 4) & 0x0F, HEX); // Print the upper nibble (first half)
+        Serial.print(byte & 0x0F, HEX);        // Print the lower nibble (second half)
+        Serial.print(" ");
+    }
+    Serial.println();
+
+    // Send the encrypted server public key (For example, send it via Serial)
+    Serial.print("Part 2 public key: ");
+    for (size_t i = 0; i < (DER_SIZE / 2); i++)
+    {
+        uint8_t byte = part2[i];
+        Serial.print((byte >> 4) & 0x0F, HEX); // Print the upper nibble (first half)
+        Serial.print(byte & 0x0F, HEX);        // Print the lower nibble (second half)
+        Serial.print(" ");
+    }
+    Serial.println(); */
+
+    // lets start sedning the first key
     // Encrypt the server's public key using the client’s public key
-    ret = mbedtls_pk_encrypt(&rsa_pub_ctx, server_public_key, DER_SIZE, encrypted_server_key, &encrypted_len, sizeof(encrypted_server_key), mbedtls_ctr_drbg_random, &ctr_drbg);
+    ret = mbedtls_pk_encrypt(&rsa_pub_ctx, part1, (DER_SIZE / 2), encrypted_server_key, &encrypted_len, sizeof(encrypted_server_key), mbedtls_ctr_drbg_random, &ctr_drbg);
     if (ret != 0)
     {
         delay(500);
@@ -189,7 +233,32 @@ void send_encrypted_server_key(void)
     }
 
     // Send the encrypted server public key (For example, send it via Serial)
-    Serial.print("Encrypted server public key: ");
+    Serial.print("Encrypted server public key part 1: ");
+    for (size_t i = 0; i < encrypted_len; i++)
+    {
+        Serial.print(encrypted_server_key[i], HEX);
+        Serial.print(" ");
+    }
+    Serial.println();
+
+    // here we send it
+    Serial.write(encrypted_server_key, RSA_SIZE);
+
+    // lets we send the second part of the key!
+    // Encrypt the server's public key using the client’s public key
+    ret = mbedtls_pk_encrypt(&rsa_pub_ctx, part2, (DER_SIZE / 2), encrypted_server_key, &encrypted_len, sizeof(encrypted_server_key), mbedtls_ctr_drbg_random, &ctr_drbg);
+    if (ret != 0)
+    {
+        delay(500);
+        char error_buf[100];
+        mbedtls_strerror(ret, error_buf, sizeof(error_buf));
+        Serial.print("Encryption failed, error: ");
+        Serial.println(error_buf);
+        return;
+    }
+
+    // Send the encrypted server public key (For example, send it via Serial)
+    Serial.print("Encrypted server public key part 2: ");
     for (size_t i = 0; i < encrypted_len; i++)
     {
         Serial.print(encrypted_server_key[i], HEX);
@@ -291,9 +360,10 @@ void exchange_keys()
     // =============== THE WE GET HMAC
     while (Serial.available() != 32)
     {
-        blink_blue(1, 100); // Optional: blink to indicate waiting
+        /* blink_blue(1, 100); // Optional: blink to indicate waiting
         Serial.print("Waiting... Available bytes: ");
-        Serial.println(Serial.available());
+        Serial.println(Serial.available()); */
+        delay(100);
     }
     uint8_t client_HMAC[HASH_SIZE];
     // Read the hash of the public key (second part)
@@ -303,33 +373,36 @@ void exchange_keys()
     }
 
     // Optionally print the received data (e.g., the hash of the public key)
-    Serial.print("Received HMAC: ");
+    /* Serial.print("Received HMAC: ");
     for (size_t i = 0; i < HASH_SIZE; i++)
     {
         uint8_t byte = client_HMAC[i];
         Serial.print((byte >> 4) & 0x0F, HEX); // Print the upper nibble (first half)
         Serial.print(byte & 0x0F, HEX);        // Print the lower nibble (second half)
     }
-    Serial.println();
+    Serial.println(); */
 
     // Verify HMAC signature of the public key
     bool is_hmac_valid = verify_hmac_signature(client_pub_key, DER_SIZE, client_HMAC, HASH_SIZE);
 
-    /* if (is_hmac_valid)
+    if (is_hmac_valid)
     {
-        blink_green(5, 500); // Indicate success if both hash and HMAC are valid
+        Serial.println("HMAC is valid");
+        // blink_green(5, 500); // Indicate success if both hash and HMAC are valid
     }
     else
     {
-        blink_red(5, 500); // Indicate failure if hash or HMAC is invalid
-    } */
+        Serial.println("HMAC is not valid");
+        // blink_red(5, 500); // Indicate failure if hash or HMAC is invalid
+    }
 
     // ===================== THE WE GET HASH
     while (Serial.available() != HASH_SIZE)
     {
-        blink_blue(1, 100); // Optional: blink to indicate waiting
+        /* blink_blue(1, 100); // Optional: blink to indicate waiting
         Serial.print("Waiting... Available bytes: ");
-        Serial.println(Serial.available());
+        Serial.println(Serial.available()); */
+        delay(100);
     }
 
     uint8_t signed_pub_key_hash[HASH_SIZE];
@@ -340,27 +413,27 @@ void exchange_keys()
     }
 
     // Optionally print the received data (e.g., the hash of the public key)
-    Serial.print("Received hash: ");
+    /* Serial.print("Received hash: ");
     for (size_t i = 0; i < HASH_SIZE; i++)
     {
         uint8_t byte = signed_pub_key_hash[i];
         Serial.print((byte >> 4) & 0x0F, HEX); // Print the upper nibble (first half)
         Serial.print(byte & 0x0F, HEX);        // Print the lower nibble (second half)
     }
-    Serial.println();
+    Serial.println(); */
 
     // Verify the hash
     bool is_hash_valid = verify_hash(client_pub_key, DER_SIZE, signed_pub_key_hash);
-    /* if (is_hash_valid)
+    if (is_hash_valid)
     {
         Serial.println("Hash is valid");
-        blink_green(5, 500);
+        // blink_green(5, 500);
     }
     else
     {
         Serial.println("Hash not valid");
-        blink_red(5, 500);
-    } */
+        // blink_red(5, 500);
+    }
 
     // Save the first public key
     if (is_hash_valid && is_hmac_valid)

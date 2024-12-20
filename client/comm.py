@@ -24,9 +24,9 @@ class Communication:
         self.aes_key = random.randbytes(AES_SIZE)  # Random AES Key
 
         # Client's public and private key
-        self.client_keys = self.rsa_keys.export_public_key(format="DER")  # Public key in DER format
+        self.client_public_key = self.rsa_keys.export_public_key(format="DER")  # Public key in DER format
         self.server_pub_key = None  # Placeholder for the server's public key
-        print(f"Public key size: {len(self.client_keys)} bytes")
+        print(f"Public key size: {len(self.client_public_key)} bytes")
 
         # Iterate over each byte in the byte string and print it as a hexadecimal string
         for byte in _SECRET_KEY:
@@ -57,19 +57,19 @@ class Communication:
     def send_public_key(self):
         """ Send the client's public key using the HVAC key for signing and its hash """
         # Sign the public key with the HVAC key using HMAC and SHA-256
-        hmac_object = hmac.new(_SECRET_KEY, self.client_keys, hashlib.sha256)
+        hmac_object = hmac.new(_SECRET_KEY, self.client_public_key, hashlib.sha256)
         signed_pub_key = hmac_object.digest()  # Get the digest (signed result)
         
         # Hash the signed public key to send its hash
-        signed_pub_key_hash = self.hash_data(self.client_keys)
+        signed_pub_key_hash = self.hash_data(self.client_public_key)
 
         # Print the size (in bytes) of the data being written
-        print(f"Size of public_key_der (public key): {len(self.client_keys)} bytes")
+        print(f"Size of public_key_der (public key): {len(self.client_public_key)} bytes")
         print(f"Size of signed_pub_key: {len(signed_pub_key)} bytes")
         print(f"Size of signed_pub_key_hash: {len(signed_pub_key_hash)} bytes")
 
         # Log the actual byte content
-        print(f"Sending public key (hex): {self.client_keys.hex()}")
+        print(f"Sending public key (hex): {self.client_public_key.hex()}")
         print(f"Sending signed_pub_key (hex): {signed_pub_key.hex()}")
         print(f"Sending signed_pub_key_hash (hex): {signed_pub_key_hash.hex()}")
 
@@ -79,8 +79,8 @@ class Communication:
         self.serial_connection.flush()  # Ensure data is written out of the buffer """
 
         chunk_size = 64
-        for i in range(0, len(self.client_keys), chunk_size):
-            self.serial_connection.write(self.client_keys[i:i + chunk_size])
+        for i in range(0, len(self.client_public_key), chunk_size):
+            self.serial_connection.write(self.client_public_key[i:i + chunk_size])
             self.serial_connection.flush()
             time.sleep(0.5)  # Allow the server to process each chunk
 

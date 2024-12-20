@@ -37,6 +37,7 @@ static uint8_t SEC_KEY[32] = {
     0x33, 0x6E, 0x47, 0x5D, 0x38, 0x7A, 0x31, 0x2B};
 
 static uint8_t client_public_key[DER_SIZE]; // Global variable to store the client’s public key
+static uint8_t server_public_key[DER_SIZE]; // Global variable to store the Servers’s public key
 
 #define RED_LED 26
 #define GREEN_LED 23
@@ -136,10 +137,10 @@ bool verify_hmac_signature(const uint8_t *public_key, size_t public_key_size, co
 // void send_encrypted_server_key(uint8_t *server_public_key)
 void send_encrypted_server_key(void)
 {
-    uint8_t public_key[DER_SIZE];
-
-    int ret = mbedtls_pk_write_pubkey_der(&rsa_keys_ctx, public_key, sizeof(public_key));
-    if (ret < 0)
+    // here we export the servers public key to the global buffer: server_public_key!
+    // we get the key from our initilized rsa_keys_ctx
+    int ret = mbedtls_pk_write_pubkey_der(&rsa_keys_ctx, server_public_key, DER_SIZE);
+    if (ret != DER_SIZE)
     {
         delay(500);
         char error_buf[100];
@@ -149,7 +150,10 @@ void send_encrypted_server_key(void)
         return;
     }
 
-    ret = mbedtls_pk_parse_public_key(&rsa_pub_ctx, public_key, DER_SIZE);
+    // here we transfer over the public key we got from the Client into rsa_pub_ctx
+    // so the buffer client_public_key contains the public key from the client
+    mbedtls_pk_init(&rsa_pub_ctx);
+    ret = mbedtls_pk_parse_public_key(&rsa_pub_ctx, client_public_key, DER_SIZE);
     if (ret != 0)
     {
         // Handle error
@@ -161,25 +165,19 @@ void send_encrypted_server_key(void)
         return;
     }
 
-    // Initialize the client public key context
-    mbedtls_pk_context client_pub_key_ctx;
-    mbedtls_pk_init(&client_pub_key_ctx);
-
-    // Parse the client public key into the context
-    ret = mbedtls_pk_parse_public_key(&client_pub_key_ctx, client_public_key, DER_SIZE);
-    if (ret != 0)
+    // here we check if we got the correct type!
+    if (MBEDTLS_PK_RSA != mbedtls_pk_get_type(&rsa_pub_ctx))
     {
-        Serial.print("Failed to parse client public key, error: ");
-        Serial.println(ret);
+        Serial.println("Failed the MBEDTLS_PK_RSA!");
         return;
     }
 
     // Now, we will encrypt the server's public key using the client's public key
-    uint8_t encrypted_server_key[RSA_SIZE]; // Buffer to hold the encrypted server public key
-    size_t encrypted_len = 0;
+    uint8_t encrypted_server_key[RSA_SIZE]{0}; // Buffer to hold the encrypted server public key
+    size_t encrypted_len{0};
 
     // Encrypt the server's public key using the client’s public key
-    ret = mbedtls_pk_encrypt(&client_pub_key_ctx, public_key, DER_SIZE, encrypted_server_key, &encrypted_len, sizeof(encrypted_server_key), mbedtls_ctr_drbg_random, &ctr_drbg);
+    ret = mbedtls_pk_encrypt(&rsa_pub_ctx, server_public_key, DER_SIZE, encrypted_server_key, &encrypted_len, sizeof(encrypted_server_key), mbedtls_ctr_drbg_random, &ctr_drbg);
     if (ret != 0)
     {
         delay(500);
@@ -199,8 +197,11 @@ void send_encrypted_server_key(void)
     }
     Serial.println();
 
+    // here we send it
+    Serial.write(encrypted_server_key, RSA_SIZE);
+
     // Clean up the client public key context
-    mbedtls_pk_free(&client_pub_key_ctx);
+    mbedtls_pk_free(&rsa_pub_ctx);
 }
 
 void setup()
@@ -248,9 +249,6 @@ void setup()
 
 void exchange_keys()
 {
-    // Initialize RSA contexts for server keys
-    mbedtls_pk_init(&rsa_keys_ctx);
-    mbedtls_pk_init(&rsa_pub_ctx);
 
     // signing that it can start echanging keys
     blink_green(2, 500);

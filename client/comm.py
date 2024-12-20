@@ -107,22 +107,12 @@ class Communication:
             print("Error: Received parts are not of expected RSA size.")
             return False
 
-        # Receive the hashes of the server's two part encrypted public key
-        received_hash1 = self.serial_connection.read(HASH_SIZE)
-        received_hash2 = self.serial_connection.read(HASH_SIZE)
+        # Receive the hash of the server's public key
+        received_hash = self.serial_connection.read(HASH_SIZE)
 
-
-        if len(received_hash1) != HASH_SIZE or len(received_hash2) != HASH_SIZE :
+        if len(received_hash) != HASH_SIZE:
             print("Error: Received hash is not of expected size.")
             return False
-        
-        computed_hash1 = hmac.new(_SECRET_KEY, decrypted_part1, hashlib.sha256).digest()
-        computed_hash2 = hmac.new(_SECRET_KEY, decrypted_part2, hashlib.sha256).digest()
-
-        if computed_hash1 != received_hash1 or computed_hash2 != received_hash2:
-            print("Error: Hash validation failed for one or both parts.")
-            return False
-
 
         # Decrypt the two parts
         print("Decrypting the server public key parts...")
@@ -132,11 +122,20 @@ class Communication:
         # Combine the decrypted parts to reconstruct the server public key
         server_pub_key = decrypted_part1 + decrypted_part2
 
+        # Validate the received hash
+        print("Validating hash of the reconstructed server public key...")
+        computed_hash = hmac.new(_SECRET_KEY, server_pub_key, hashlib.sha256).digest()
+
+        if computed_hash != received_hash:
+            print("Error: Hash validation failed.")
+            return False
+
         # Store the server's public key
         self.server_pub_key = server_pub_key
         print("Server public key successfully received and validated.")
 
         return True
+
 
     def send_new_public_key(self):
         """ Send the new encrypted client public key and hash to the server """
@@ -155,11 +154,6 @@ class Communication:
         self.serial_connection.write(new_pub_key_hash)
 
         return True
-
-    def verify_received_hash(self, encrypted_pub_key, received_hash):
-        """ Verify the hash of the decrypted public key from the server """
-        hashed_pub_key = self.hash_data(encrypted_pub_key)
-        return hashed_pub_key == received_hash
 
 def startup():
     # Initialize serial communication and communication object

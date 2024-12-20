@@ -301,14 +301,11 @@ void send_encrypted_server_key(void)
     // here we send it
     Serial.write(encrypted_server_key_part_2, RSA_SIZE);
 
-    if (!send_hash(encrypted_server_key_part_1))
+    // The hash should "contain" the unencrypted server public key
+    // so you can the veryfy the hash after decrypting the two parts and putting them together
+    if (!send_hash(server_public_key))
     {
-        Serial.println("Failed to send hash 1!");
-    }
-
-    if (!send_hash(encrypted_server_key_part_2))
-    {
-        Serial.println("Failed to send hash 2!");
+        Serial.println("Failed to send hash!");
     }
 
     // Clean up the client public key context

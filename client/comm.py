@@ -96,23 +96,47 @@ class Communication:
 
 
     def receive_server_public_key(self):
-        """ Receive the encrypted server public key and its hash from the server """
-        encrypted_server_pub_key = self.serial_connection.read(RSA_SIZE)
-        server_pub_key_hash = self.serial_connection.read(HASH_SIZE)
+        """Receive, decrypt, and validate the server's public key."""
+        print("Receiving server public key parts...")
 
-        return encrypted_server_pub_key, server_pub_key_hash
+        # Receive the encrypted parts of the server's public key
+        encrypted_part1 = self.serial_connection.read(RSA_SIZE)
+        encrypted_part2 = self.serial_connection.read(RSA_SIZE)
 
-    def decrypt_server_public_key(self, encrypted_server_pub_key):
-        """ Decrypt the server's public key using the client's private key """
-        try:
-            # Decrypt the encrypted server public key with the client's private key
-            decrypted_pub_key = self.client_keys.decrypt(encrypted_server_pub_key)
-            self.server_pub_key = decrypted_pub_key
-            return decrypted_pub_key
-        except Exception as e:
-            print(f"Error decrypting server public key: {e}")
-            return None
+        if len(encrypted_part1) != RSA_SIZE or len(encrypted_part2) != RSA_SIZE:
+            print("Error: Received parts are not of expected RSA size.")
+            return False
 
+        # Receive the hashes of the server's two part encrypted public key
+        received_hash1 = self.serial_connection.read(HASH_SIZE)
+        received_hash2 = self.serial_connection.read(HASH_SIZE)
+
+
+        if len(received_hash1) != HASH_SIZE or len(received_hash2) != HASH_SIZE :
+            print("Error: Received hash is not of expected size.")
+            return False
+        
+        computed_hash1 = hmac.new(_SECRET_KEY, decrypted_part1, hashlib.sha256).digest()
+        computed_hash2 = hmac.new(_SECRET_KEY, decrypted_part2, hashlib.sha256).digest()
+
+        if computed_hash1 != received_hash1 or computed_hash2 != received_hash2:
+            print("Error: Hash validation failed for one or both parts.")
+            return False
+
+
+        # Decrypt the two parts
+        print("Decrypting the server public key parts...")
+        decrypted_part1 = self.rsa_keys.decrypt(encrypted_part1)
+        decrypted_part2 = self.rsa_keys.decrypt(encrypted_part2)
+
+        # Combine the decrypted parts to reconstruct the server public key
+        server_pub_key = decrypted_part1 + decrypted_part2
+
+        # Store the server's public key
+        self.server_pub_key = server_pub_key
+        print("Server public key successfully received and validated.")
+
+        return True
 
     def send_new_public_key(self):
         """ Send the new encrypted client public key and hash to the server """

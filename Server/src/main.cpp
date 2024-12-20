@@ -107,6 +107,34 @@ bool verify_hash(const uint8_t *public_key, size_t public_key_size, const uint8_
     return true; // Hashes match
 }
 
+bool send_hash(const uint8_t *data)
+{
+    bool status{false};
+
+    uint8_t hash[HASH_SIZE]{0};
+
+    if (0 == mbedtls_sha256_starts_ret(&sha256_ctx, 0))
+    {
+        // hash the message
+        if (0 == mbedtls_sha256_update_ret(&sha256_ctx, data, sizeof(data)))
+        {
+            // Give the hash also using the secret key
+            if (0 == mbedtls_sha256_update_ret(&sha256_ctx, SEC_KEY, sizeof(SEC_KEY)))
+            {
+                if (0 == mbedtls_sha256_finish_ret(&sha256_ctx, hash))
+                {
+                    // Then send the hash
+                    Serial.write(hash, HASH_SIZE);
+                    Serial.println("Sent data with hash!");
+                    status = true;
+                }
+            }
+        }
+    }
+
+    return status;
+}
+
 bool verify_hmac_signature(const uint8_t *public_key, size_t public_key_size, const uint8_t *received_hmac, size_t hmac_size)
 {
     uint8_t computed_hmac[HASH_SIZE];
@@ -172,10 +200,6 @@ void send_encrypted_server_key(void)
         return;
     }
 
-    // Now, we will encrypt the server's public key using the client's public key
-    uint8_t encrypted_server_key[RSA_SIZE]{0}; // Buffer to hold the encrypted server public key
-    size_t encrypted_len;
-
     // Public key is bigger than RSA_SIZE at 294 bytes
     // so we first split it into two parts
     uint8_t part1[DER_SIZE / 2]{0}; // Buffer for first half
@@ -220,8 +244,12 @@ void send_encrypted_server_key(void)
     Serial.println(); */
 
     // lets start sedning the first key
+    // Now, we will encrypt the server's public key using the client's public key
+    uint8_t encrypted_server_key_part_1[RSA_SIZE]{0}; // Buffer to hold the encrypted server public key part 1
+    size_t encrypted_len_part_1;
+
     // Encrypt the server's public key using the client’s public key
-    ret = mbedtls_pk_encrypt(&rsa_pub_ctx, part1, (DER_SIZE / 2), encrypted_server_key, &encrypted_len, sizeof(encrypted_server_key), mbedtls_ctr_drbg_random, &ctr_drbg);
+    ret = mbedtls_pk_encrypt(&rsa_pub_ctx, part1, (DER_SIZE / 2), encrypted_server_key_part_1, &encrypted_len_part_1, sizeof(encrypted_server_key_part_1), mbedtls_ctr_drbg_random, &ctr_drbg);
     if (ret != 0)
     {
         delay(500);
@@ -234,19 +262,23 @@ void send_encrypted_server_key(void)
 
     // Send the encrypted server public key (For example, send it via Serial)
     Serial.print("Encrypted server public key part 1: ");
-    for (size_t i = 0; i < encrypted_len; i++)
+    for (size_t i = 0; i < encrypted_len_part_1; i++)
     {
-        Serial.print(encrypted_server_key[i], HEX);
+        Serial.print(encrypted_server_key_part_1[i], HEX);
         Serial.print(" ");
     }
     Serial.println();
 
     // here we send it
-    Serial.write(encrypted_server_key, RSA_SIZE);
+    Serial.write(encrypted_server_key_part_1, RSA_SIZE);
+
+    // ========= SECOND PART OF PUBLIC KEY ==========
+    uint8_t encrypted_server_key_part_2[RSA_SIZE]{0}; // Buffer to hold the encrypted server public key
+    size_t encrypted_len_part_2;
 
     // lets we send the second part of the key!
     // Encrypt the server's public key using the client’s public key
-    ret = mbedtls_pk_encrypt(&rsa_pub_ctx, part2, (DER_SIZE / 2), encrypted_server_key, &encrypted_len, sizeof(encrypted_server_key), mbedtls_ctr_drbg_random, &ctr_drbg);
+    ret = mbedtls_pk_encrypt(&rsa_pub_ctx, part2, (DER_SIZE / 2), encrypted_server_key_part_2, &encrypted_len_part_2, sizeof(encrypted_server_key_part_2), mbedtls_ctr_drbg_random, &ctr_drbg);
     if (ret != 0)
     {
         delay(500);
@@ -259,15 +291,25 @@ void send_encrypted_server_key(void)
 
     // Send the encrypted server public key (For example, send it via Serial)
     Serial.print("Encrypted server public key part 2: ");
-    for (size_t i = 0; i < encrypted_len; i++)
+    for (size_t i = 0; i < encrypted_len_part_2; i++)
     {
-        Serial.print(encrypted_server_key[i], HEX);
+        Serial.print(encrypted_server_key_part_2[i], HEX);
         Serial.print(" ");
     }
     Serial.println();
 
     // here we send it
-    Serial.write(encrypted_server_key, RSA_SIZE);
+    Serial.write(encrypted_server_key_part_2, RSA_SIZE);
+
+    if (!send_hash(encrypted_server_key_part_1))
+    {
+        Serial.println("Failed to send hash 1!");
+    }
+
+    if (!send_hash(encrypted_server_key_part_2))
+    {
+        Serial.println("Failed to send hash 2!");
+    }
 
     // Clean up the client public key context
     mbedtls_pk_free(&rsa_pub_ctx);
